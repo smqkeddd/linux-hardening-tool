@@ -43,14 +43,6 @@ Le script te demandera confirmation avant d'appliquer le moindre changement.
 ssh -p <nouveau_port> root@<ip_de_la_machine>
 ```
 
-## Roadmap
-
-- [ ] V1.1 : option pour créer un utilisateur sudo non-root
-- [ ] V1.2 : désactivation optionnelle de `PermitRootLogin`
-- [ ] V2 : intégration firewall (`ufw`) basique
-- [ ] V2 : intégration `fail2ban`
-- [ ] V3 : support de l'authentification par clé SSH
-
 Voir les [issues](../../issues) pour le suivi détaillé.
 
 ## Contribuer
