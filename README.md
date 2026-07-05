@@ -4,7 +4,7 @@ Un outil simple en Bash pour sécuriser rapidement un serveur Linux (Debian/Ubun
 
 ## ⚠️ Avertissement
 
-Ce projet est en développement actif (V1). **Teste-le toujours sur une VM ou un conteneur jetable avant de l'utiliser sur une machine en production.** Un bug dans la configuration SSH peut te couper l'accès distant à ta machine si tu n'as pas d'accès console physique/hyperviseur de secours.
+Ce projet est en développement actif . **A Tester sur une VM ou un conteneur jetable avant de l'utiliser sur une machine en production.** Un bug dans la configuration SSH peut te couper l'accès distant à ta machine si tu n'as pas d'accès console physique/hyperviseur de secours.
 
 ## Ce que fait la V1.2
 
@@ -25,7 +25,7 @@ Ce projet est en développement actif (V1). **Teste-le toujours sur une VM ou un
 - Debian ou Ubuntu (testé sur Debian 12)
 - Accès root ou sudo
 - OpenSSH installé (`openssh-server`)
-- Accès internet pour l'installation de fail2ban (si tu choisis cette option)
+- Accès internet pour l'installation de fail2ban
 
 ## Installation
 
