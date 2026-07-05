@@ -24,7 +24,7 @@ Ce projet est en développement actif (V1). **Teste-le toujours sur une VM ou un
 ## Installation
 
 ```bash
-git clone https://github.com/<ton-user>/linux-hardening-tool.git
+git clone https://github.com/smqkeddd/linux-hardening-tool.git
 cd linux-hardening-tool
 chmod +x harden.sh
 ```
