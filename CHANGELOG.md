@@ -12,16 +12,8 @@ et ce projet respecte le [Semantic Versioning](https://semver.org/lang/fr/).
 - Désactivation optionnelle de PermitRootLogin
 - Intégration ufw
 
-## [0.2.0] - 2026-07-05
-
-### Ajouté
-- Génération et application d'un mot de passe GRUB aléatoire (`password_pbkdf2`)
-- Sauvegarde automatique de `/etc/grub.d/40_custom` avant modification
-- Restauration automatique de la config GRUB en cas d'échec de `update-grub`
-- Le mot de passe GRUB est désormais affiché avec les autres identifiants (une seule fois)
-
-### Modifié
-- Le script passe en V1.1, gère désormais un échec silencieux si GRUB n'est pas installé (ex : environnements cloud sans GRUB classique)
+### Testé puis mis de côté
+- Mot de passe GRUB aléatoire : fonctionnel, mais retiré temporairement car le comportement par défaut de GRUB (`superusers` + `password_pbkdf2`) demande le mot de passe à **chaque démarrage**, pas seulement pour l'édition des entrées de boot. Risque de blocage sur un serveur distant sans accès console. À réintroduire une fois l'option `--unrestricted` correctement gérée pour les entrées de boot normales.
 
 ## [0.1.0] - 2026-07-05
 
