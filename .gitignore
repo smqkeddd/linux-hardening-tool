@@ -1,0 +1,10 @@
+# Sauvegardes générées par le script (ne doivent jamais être commitées)
+*.bak.*
+
+# Fichiers système
+.DS_Store
+*.swp
+
+# Éditeurs
+.vscode/
+.idea/
