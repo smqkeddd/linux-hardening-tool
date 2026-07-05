@@ -152,12 +152,49 @@ fi
 info "Configuration valide."
 
 # ----------------------------------------------------------------------------
+# Fonction : installation et configuration de fail2ban (dans tous les cas)
+# ----------------------------------------------------------------------------
+install_fail2ban() {
+    info "Installation de fail2ban..."
+    if ! command -v fail2ban-client &> /dev/null; then
+        apt-get update -qq && apt-get install -y fail2ban
+    else
+        info "fail2ban déjà installé."
+    fi
+
+    local jail_file="/etc/fail2ban/jail.local"
+    if [[ -f "$jail_file" ]]; then
+        cp "$jail_file" "${jail_file}.bak.$(date +%Y%m%d%H%M%S)"
+    fi
+
+    cat > "$jail_file" << EOF
+[sshd]
+enabled = true
+port = ${NEW_SSH_PORT}
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+findtime = 600
+bantime = 3600
+EOF
+
+    systemctl enable fail2ban &> /dev/null || true
+    if systemctl restart fail2ban; then
+        info "fail2ban configuré et actif sur le port ${NEW_SSH_PORT} (3 tentatives max, ban 1h)."
+    else
+        warn "fail2ban installé mais le redémarrage du service a échoué. Vérifie manuellement : systemctl status fail2ban"
+    fi
+}
+
+# ----------------------------------------------------------------------------
 # 6. Choix du mode d'authentification
 # ----------------------------------------------------------------------------
 echo ""
 echo -e "${BOLD}Comment veux-tu gérer l'authentification SSH ?${NC}"
 echo "  [1] Authentification par clé SSH (désactive le mot de passe après test)"
-echo "  [2] Garder le mot de passe, mais ajouter fail2ban"
+echo "  [2] Garder le mot de passe"
+echo ""
+echo -e "${YELLOW}Dans les deux cas, fail2ban sera installé et configuré.${NC}"
 echo ""
 read -rp "Ton choix (1/2) : " AUTH_MODE
 
@@ -222,6 +259,8 @@ case "$AUTH_MODE" in
             warn "Authentification par mot de passe LAISSÉE ACTIVE par sécurité."
             warn "Relance le script une fois ta clé fonctionnelle pour désactiver le mot de passe."
         fi
+
+        install_fail2ban
         ;;
 
     2)
@@ -240,35 +279,7 @@ case "$AUTH_MODE" in
             restore_backup_and_exit
         fi
 
-        info "Installation de fail2ban..."
-        if ! command -v fail2ban-client &> /dev/null; then
-            apt-get update -qq && apt-get install -y fail2ban
-        else
-            info "fail2ban déjà installé."
-        fi
-
-        JAIL_FILE="/etc/fail2ban/jail.local"
-        if [[ -f "$JAIL_FILE" ]]; then
-            cp "$JAIL_FILE" "${JAIL_FILE}.bak.$(date +%Y%m%d%H%M%S)"
-        fi
-
-        cat > "$JAIL_FILE" << EOF
-[sshd]
-enabled = true
-port = ${NEW_SSH_PORT}
-filter = sshd
-logpath = /var/log/auth.log
-maxretry = 3
-findtime = 600
-bantime = 3600
-EOF
-
-        systemctl enable fail2ban &> /dev/null || true
-        if systemctl restart fail2ban; then
-            info "fail2ban configuré et actif sur le port ${NEW_SSH_PORT} (3 tentatives max, ban 1h)."
-        else
-            warn "fail2ban installé mais le redémarrage du service a échoué. Vérifie manuellement : systemctl status fail2ban"
-        fi
+        install_fail2ban
         ;;
 
     *)
@@ -294,8 +305,8 @@ if [[ "$AUTH_MODE" == "1" ]]; then
     echo -e "${YELLOW}Le mot de passe root reste utile comme accès de secours via la console.${NC}"
 else
     echo -e "Reconnexion : ${BOLD}ssh -p ${NEW_SSH_PORT} root@<ip_de_la_machine>${NC}"
-    echo -e "${YELLOW}fail2ban est actif : 3 tentatives échouées = ban d'1h sur l'IP.${NC}"
 fi
+echo -e "${YELLOW}fail2ban est actif : 3 tentatives échouées = ban d'1h sur l'IP.${NC}"
 echo ""
 warn "IMPORTANT : teste la connexion SSH sur le nouveau port AVANT de fermer"
 warn "cette session, pour être sûr de ne pas te retrouver bloqué dehors."
