@@ -10,48 +10,53 @@ Ce projet est en développement actif. **Teste-le toujours sur une VM ou un cont
 
 ## Scripts inclus
 
-- **`harden.sh`** — sécurise la machine (mot de passe root, port SSH, durcissement, authentification, fail2ban, politique de mots de passe, auditd, AIDE)
+- **`harden.sh`** — sécurise la machine
 - **`unharden.sh`** — annule les modifications de `harden.sh`, avec deux modes au choix
 
 ## Ce que fait `harden.sh`
 
-- Propose deux modes d'utilisation :
+- Deux modes d'utilisation :
   - **Simple** : tout est généré automatiquement (recommandé si tu débutes)
-  - **Avancé** : tu choisis toi-même le port SSH, le mot de passe root, et les réglages fins (MaxAuthTries, fail2ban, etc.) — Entrée à chaque question garde la valeur par défaut recommandée
-- Sauvegarde automatique de `/etc/ssh/sshd_config` avant toute modification
-- Génère (ou définit, en mode avancé) un mot de passe root sécurisé
-- Génère (ou définit, en mode avancé) un port SSH
-- Durcit les paramètres SSH communs : `MaxAuthTries`, `ClientAliveCountMax`, `MaxSessions`, désactivation de `X11Forwarding`/`AllowTcpForwarding`/`AllowAgentForwarding`/`Compression`
-- Propose un choix d'authentification :
+  - **Avancé** : tu choisis le port SSH, le mot de passe root, le mot de passe GRUB, et les réglages fins — Entrée à chaque question garde la valeur par défaut recommandée
+- Mot de passe root et port SSH (aléatoires ou personnalisés)
+- Durcissement SSH : `MaxAuthTries`, `ClientAliveCountMax`, `MaxSessions`, désactivation de `X11Forwarding`/`AllowTcpForwarding`/`AllowAgentForwarding`/`Compression`
+- Choix d'authentification :
   - **Clé SSH** : ajoute ta clé publique, teste la connexion avant de désactiver le mot de passe (aucun risque de blocage)
   - **Mot de passe** : garde le mot de passe actif
-- **fail2ban** installé et configuré dans les deux cas (paramètres personnalisables en mode avancé)
-- **Politique d'expiration des mots de passe** : max 90 jours, min 7 jours, avertissement 14 jours avant expiration — appliqué à `root` et à tous les comptes existants (`/etc/login.defs` + `chage`)
-- **Complexité des mots de passe** (`pam_pwquality`) : 12 caractères minimum, majuscule + minuscule + chiffre + symbole exigés
-- **auditd** : trace les accès/modifications sur les fichiers sensibles (`/etc/passwd`, `/etc/shadow`, `sshd_config`, `sudoers`) et les exécutions de `passwd`/`sudo`
-- **AIDE** : installe et initialise une base de référence pour détecter toute modification non autorisée de fichiers système
-- Vérifie la validité de la configuration SSH avant chaque redémarrage du service (`sshd -t`)
-- Restaure automatiquement la sauvegarde en cas d'erreur sur la partie SSH
-- Chacun des 4 durcissements complémentaires (politique mdp, complexité, auditd, AIDE) s'exécute de façon isolée : si l'un échoue (ex. pas de connexion internet), le script continue sans s'arrêter
-- Sauvegarde l'état d'origine de la machine (une seule fois, lors du tout premier lancement) pour permettre un rollback complet via `unharden.sh`
-- Affiche les nouvelles informations **une seule fois** à l'écran, jamais stockées sur disque
+- **fail2ban** (paramètres personnalisables en mode avancé)
+- **Politique de mots de passe** : expiration 90j, umask 027, rounds de hashage SHA512 (`login.defs` + `chage`)
+- **Complexité des mots de passe** (`pam_pwquality`) : 12 caractères min, majuscule/minuscule/chiffre/symbole
+- **auditd** : trace les accès aux fichiers sensibles (`passwd`, `shadow`, `sshd_config`, `sudoers`) et les exécutions de `passwd`/`sudo`
+- **AIDE** : intégrité des fichiers système (checksum SHA256/SHA512)
+- **rkhunter** : scanner de malware/rootkit
+- Core dumps désactivés, stockage USB/Firewire désactivé, protocoles réseau rares bloqués (dccp/sctp/rds/tipc)
+- Mises à jour de sécurité automatiques (`unattended-upgrades`)
+- Process accounting (`acct`) + `sysstat`
+- Bannière légale SSH (bilingue, conforme aux exigences des audits de sécurité type Lynis)
+- Synchronisation NTP (`systemd-timesyncd`)
+- **Mot de passe GRUB** : protège l'édition des entrées de boot et la console GRUB, **sans** bloquer le démarrage normal
+- **PermitRootLogin=prohibit-password** : appliqué uniquement si l'authentification par clé a été confirmée fonctionnelle dans la même exécution (sinon laissé inchangé, pour éviter tout blocage)
+- Vérifie la validité de la configuration SSH avant chaque redémarrage (`sshd -t`), restaure automatiquement en cas d'erreur
+- Chaque durcissement complémentaire s'exécute de façon isolée : un échec n'interrompt jamais le reste du script
+- Sauvegarde l'état d'origine de la machine (une seule fois, au tout premier lancement) pour permettre un rollback complet via `unharden.sh`
+- Affiche les informations sensibles **une seule fois**, jamais stockées sur disque
 
 ## Ce que fait `unharden.sh`
 
-Propose un menu à deux modes :
+Menu à deux modes :
 
-- **[1] Reset complet par défaut** : port 22, mot de passe root `root` (volontairement faible), retire la clé SSH ajoutée, désinstalle fail2ban.
-  ⚠️ Usage labo/test **uniquement**, jamais sur une machine exposée.
-- **[2] Restauration de l'état exact d'avant `harden.sh`** : redonne à `sshd_config` sa configuration d'origine (le port redevient celui d'avant, quel qu'il ait été), restaure ou supprime `authorized_keys` selon l'état d'origine, gère fail2ban en conséquence.
-  - Si la référence d'origine n'est pas disponible (ex : machine ayant utilisé une version de `harden.sh` antérieure à cette fonctionnalité), le script propose automatiquement de choisir parmi les sauvegardes `.bak.*` disponibles.
-  - **Limite connue** : le mot de passe root d'origine ne peut jamais être restauré (jamais stocké nulle part, par sécurité). Un nouveau mot de passe aléatoire est généré à la place, affiché une seule fois.
+- **[1] Reset complet par défaut** : port 22, mot de passe root `root` (volontairement faible), retire la clé SSH, désinstalle fail2ban.
+  ⚠️ Usage labo/test **uniquement**.
+- **[2] Restauration de l'état exact d'avant `harden.sh`** : redonne à `sshd_config` sa configuration d'origine (le port redevient celui d'avant), restaure/supprime `authorized_keys`, gère fail2ban en conséquence.
+  - Si la référence d'origine est absente (ancienne version de `harden.sh`), le script propose de choisir parmi les sauvegardes `.bak.*` disponibles.
+  - **Limite connue** : le mot de passe root d'origine ne peut jamais être restauré (jamais stocké). Un nouveau mot de passe aléatoire est généré à la place.
 
 ## Prérequis
 
 - Debian ou Ubuntu (testé sur Debian 12)
 - Accès root ou sudo
 - OpenSSH installé (`openssh-server`)
-- Accès internet pour l'installation de fail2ban, pam_pwquality, auditd et AIDE
+- Accès internet (installation de fail2ban, pam_pwquality, auditd, AIDE, rkhunter, etc.)
 
 ## Installation
 
@@ -69,25 +74,19 @@ chmod +x harden.sh unharden.sh
 sudo ./harden.sh
 ```
 
-Le script te demandera confirmation avant d'appliquer le moindre changement, puis te proposera de choisir entre le mode simple et le mode avancé.
-
-**Important :** garde ta session SSH actuelle ouverte et teste la connexion sur le nouveau port dans un second terminal avant de fermer la session en cours.
+**Important :** garde ta session SSH actuelle ouverte et teste la connexion sur le nouveau port dans un second terminal avant de la fermer.
 
 ```bash
 ssh -p <nouveau_port> root@<ip_de_la_machine>
 ```
 
-Si tu choisis l'authentification par clé SSH, le script garde le mot de passe actif en fallback jusqu'à ce que tu confirmes que ta clé fonctionne dans un second terminal — aucun risque de te retrouver bloqué dehors.
-
-L'initialisation d'AIDE (dernière étape) peut prendre plusieurs minutes selon la taille du système de fichiers — c'est normal.
+Si tu choisis l'authentification par clé, le mot de passe reste actif en fallback jusqu'à confirmation que la clé fonctionne. L'initialisation d'AIDE peut prendre plusieurs minutes.
 
 ### Annuler les modifications
 
 ```bash
 sudo ./unharden.sh
 ```
-
-Choisis ensuite le mode de restauration souhaité (reset par défaut, ou retour à l'état d'avant `harden.sh`).
 
 ### Consulter les logs d'audit (auditd)
 
@@ -100,6 +99,12 @@ sudo aureport --summary
 
 ```bash
 sudo aide --check
+```
+
+### Scanner les malwares (rkhunter)
+
+```bash
+sudo rkhunter --check
 ```
 
 ## Contribuer
