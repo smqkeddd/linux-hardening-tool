@@ -21,7 +21,6 @@ et ce projet respecte le [Semantic Versioning](https://semver.org/lang/fr/).
 - **Politique de mots de passe étendue** : umask 027, rounds de hashage SHA512 explicites, en plus de l'expiration déjà en place
 - **Complexité des mots de passe** (`pam_pwquality`), **auditd**, **AIDE** (durcissements "priorité élevée" de l'audit Lynis)
 - **Mode avancé pour `harden.sh`** : choix du port SSH, du mot de passe root, du mot de passe GRUB, et des réglages fins (SSH, fail2ban) — Entrée garde la valeur par défaut
-- **`unharden.sh`** : annule les modifications de `harden.sh`, menu à deux modes (reset par défaut, ou retour à l'état exact d'avant `harden.sh`), avec repli automatique sur les sauvegardes `.bak.*` si la référence d'origine est absente
 - Sauvegarde de l'état d'origine de la machine au tout premier lancement de `harden.sh` (`/var/lib/harden-sh/`)
 
 ### Corrigé
@@ -43,6 +42,7 @@ et ce projet respecte le [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Testé puis mis de côté
 - Firewall ufw : fonctionnel, mis de côté pour se concentrer sur d'autres priorités
+- **`unharden.sh`** : retiré du repo pour le moment, jugé instable. À retravailler et retester avant réintégration.
 
 ## [0.3.0] - 2026-07-05
 
@@ -64,20 +64,3 @@ et ce projet respecte le [Semantic Versioning](https://semver.org/lang/fr/).
 - Test de validité de la configuration avant redémarrage du service SSH
 - Restauration automatique en cas d'erreur
 - Affichage unique des informations sensibles à l'écran
-⠀⠀⢀⠤⣂⣤⣬⣭⣭⣭⣔⡠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠔⣵⣾⣿⣿⣿⢿⣿⣿⣿⣿⣎⢂⠀⢲⣤⣤⣤⣤⣀⣒⣒⣒⣒⣂⡠⠤⠤⣄
-⠐⣾⣿⣿⣿⡏⣾⡿⢎⣛⣫⣭⣴⣾⠆⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢼
-⡇⣿⣿⣿⣿⣟⡿⢀⣐⣻⣛⡩⢁⠀⠀⣘⣛⣛⡛⠿⠿⠿⢿⣿⣿⣿⣿⣿⢟⣾
-⡇⣿⣿⣿⣿⣷⣾⣿⣿⣿⣿⣿⣶⡕⠄⠉⠛⠛⠛⠛⡻⣣⣾⣿⣿⣿⢟⣵⣿⠛
-⠃⣿⣿⣿⣿⣿⢋⣥⠭⡻⣿⣿⣿⣿⡌⡄⠀⠀⠀⡐⣼⣿⣿⣿⡿⣣⣾⠏⠀⠀
-⠨⢻⣿⣿⣿⣧⢻⠁⠀⠘⢸⣿⣿⣿⡇⣿⠀⠀⠌⣼⣿⣿⣿⡿⢱⣿⠃⠀⠀⠀
-⠀⢦⢻⣿⣿⣿⣦⣐⣀⣊⣼⣿⣿⡿⢱⡿⠀⠰⣸⣿⣿⣿⣿⢣⣿⠃⠀⠀⠀⠀
-⠀⠀⠣⣙⠿⣿⣿⣿⣿⣿⣿⠿⢛⣵⡿⠃⢀⢃⣿⣿⣿⣿⡟⣾⡇⠀⠀⠀⠀⠀
-⠀⠀⠀⠈⠛⠶⣮⣭⣭⣴⣶⡿⠿⠋⠀⠀⢨⣘⣿⡻⠿⠿⢇⣿⠀⠀⠀⠀⠀⠀
-⠀⠀⢀⠔⠒⠂⠠⠤⠭⡀⠀⠀⠀⠀⠀⠀⠀⠙⠛⠛⠛⠛⠻⠃⠀⠀⠀⠀⠀⠀
-⢀⠆⠁⠀⡄⠀⠀⠀⠀⠈⢂⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠒⠁⠀⠀⠒⢤⡀⠀⠀
-⠣⠤⢤⠞⠂⠀⣀⠰⠃⠀⠘⣆⢀⣀⠀⠀⠀⠀⢀⠎⠀⢠⡀⠀⠀⠀⢀⠀⠙⡀
-⠀⠀⢸⠀⠈⠭⡀⢈⣡⠔⢶⠁⣹⢩⠃⠀⢀⠀⢸⠀⠀⠀⣑⣠⣤⠀⠙⡦⣀⠜
-⠀⠀⠀⠣⠀⢂⠞⠱⠴⣈⡸⠰⢇⠘⠀⠰⡭⠷⢝⡤⣂⣄⠒⢤⡐⠀⠀⡇⠀⠀
-⠀⠀⠀⠀⠱⠄⣀⢜⢁⡠⠥⠊⠀⠀⠀⠀⠡⡘⡄⠐⡂⠘⢌⡀⠉⠂⡸⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠄⠹⢅⣀⠹⠒⠊⠀⠀⠀⠠
