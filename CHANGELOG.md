@@ -8,6 +8,13 @@ et ce projet respecte le [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Non publié]
 
 ### Ajouté
+- **4 durcissements "priorité élevée" issus de l'audit Lynis**, chacun exécuté dans un sous-shell isolé (une erreur sur l'un n'interrompt jamais le reste du script) :
+  - `harden_password_policy()` : politique d'expiration des mots de passe (`PASS_MAX_DAYS 90`, `PASS_MIN_DAYS 7`, `PASS_WARN_AGE 14` dans `/etc/login.defs`), appliquée rétroactivement à `root` et à tous les comptes existants (UID ≥ 1000) via `chage`
+  - `harden_password_strength()` : installation de `pam_pwquality`, complexité exigée (12 caractères min, majuscule/minuscule/chiffre/symbole)
+  - `harden_auditd()` : installation d'auditd + règles de surveillance sur `/etc/passwd`, `/etc/shadow`, `sshd_config`, `sudoers`, et les exécutions de `passwd`/`sudo`
+  - `harden_aide()` : installation d'AIDE et initialisation de la base de référence d'intégrité des fichiers
+  - Chaque fonction sauvegarde ses fichiers de config avant modification (`login.defs.bak.*`, `common-password.bak.*`)
+- Message d'introduction de `harden.sh` détaillé avec toutes les étapes précises (dont les 4 nouvelles ci-dessus), et avertissement que ces 4 étapes sont indépendantes du reste
 - **Mode avancé pour `harden.sh`** : au lancement, choix entre mode simple (tout automatique) et mode avancé, qui permet de définir soi-même :
   - Le mot de passe root (généré aléatoirement ou personnalisé, avec confirmation double-saisie et avertissement si trop court)
   - Le port SSH (généré aléatoirement ou personnalisé, avec validation de plage, avertissement sur les ports privilégiés, et vérification qu'il n'est pas déjà utilisé)
@@ -25,6 +32,7 @@ et ce projet respecte le [Semantic Versioning](https://semver.org/lang/fr/).
 ### À venir
 - Option de création d'utilisateur sudo non-root
 - Désactivation optionnelle de PermitRootLogin
+- Éléments "priorité moyenne/faible" restants de l'audit Lynis (umask, core dump, bannière légale, mises à jour automatiques, etc.)
 
 ### Modifié
 - fail2ban est désormais installé et configuré **dans les deux modes d'authentification** (clé SSH ou mot de passe), et non plus uniquement en mode mot de passe. Utile même avec des clés pour limiter le bruit des scans/tentatives automatisées.
