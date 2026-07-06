@@ -2,7 +2,7 @@
 #
 # harden.sh - Outil de sécurisation rapide pour Debian/Ubuntu
 #
-# V1.4 :
+# V1.5 :
 #   - Mode simple (automatique) ou mode avancé (tu choisis les valeurs)
 #   - Change le mot de passe root (aléatoire ou personnalisé)
 #   - Change le port SSH (aléatoire ou personnalisé)
@@ -11,12 +11,22 @@
 #       [1] Authentification par clé SSH (désactive le mot de passe après test)
 #       [2] Conserve l'authentification par mot de passe
 #   - Installe et configure fail2ban (paramètres personnalisables en mode avancé)
+#   - Configure la politique d'expiration des mots de passe (login.defs + chage)
+#   - Installe le contrôle de complexité des mots de passe (pam_pwquality)
+#   - Installe et configure auditd (traçabilité des fichiers/actions sensibles)
+#   - Installe AIDE et initialise sa base d'intégrité des fichiers
 #   - Sauvegarde l'état d'origine (une seule fois) pour permettre un rollback via unharden.sh
 #   - Affiche les nouvelles infos UNE SEULE FOIS à l'écran (jamais stockées sur disque)
 #
 # Usage : sudo ./harden.sh
 #
 set -euo pipefail
+
+# Empêche TOUT dialogue interactif d'apt/dpkg/needrestart de bloquer le script
+# (sans ça, needrestart ou apt-listbugs peuvent afficher une invite qui
+# resterait en attente indéfiniment sur une session non-interactive)
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
 # ----------------------------------------------------------------------------
 # Couleurs pour la lisibilité du terminal
@@ -125,15 +135,27 @@ init_pristine_state() {
 
 init_pristine_state
 
-echo -e "${BOLD}=== Outil de sécurisation Linux - V1.4 ===${NC}"
+echo -e "${BOLD}=== Outil de sécurisation Linux - V1.5 ===${NC}"
 echo "Ce script va :"
 echo "  1. Sauvegarder ta configuration SSH actuelle"
 echo "  2. Générer/définir un mot de passe root"
 echo "  3. Générer/définir un port SSH"
-echo "  4. Durcir les paramètres SSH (MaxAuthTries, forwarding, etc.)"
+echo "  4. Durcir les paramètres SSH (MaxAuthTries, forwarding, compression, etc.)"
 echo "  5. Te proposer un choix : clé SSH OU mot de passe"
-echo "  6. Installer et configurer fail2ban"
-echo "  7. T'afficher les nouvelles infos UNE SEULE FOIS"
+echo "  6. Installer et configurer fail2ban (bannissement des IP après échecs)"
+echo "  7. Configurer la politique d'expiration des mots de passe"
+echo "     (max 90j, min 7j, avertissement 14j avant expiration - appliqué à"
+echo "     root et à tous les comptes existants)"
+echo "  8. Installer le contrôle de complexité des mots de passe"
+echo "     (12 caractères min, majuscule/minuscule/chiffre/symbole requis)"
+echo "  9. Installer et configurer auditd (traçabilité des accès sensibles :"
+echo "     /etc/passwd, /etc/shadow, sshd_config, sudoers, exécutions sudo)"
+echo " 10. Installer AIDE et initialiser sa base d'intégrité des fichiers"
+echo "     (peut prendre plusieurs minutes)"
+echo " 11. T'afficher les nouvelles infos UNE SEULE FOIS"
+echo ""
+warn "Les étapes 7 à 10 sont chacune indépendantes : si l'une échoue (ex: pas"
+warn "de connexion internet), le script continue sans s'arrêter."
 echo ""
 read -rp "Continuer ? (o/N) : " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[oOyY]$ ]]; then
@@ -495,6 +517,18 @@ harden_password_policy() {
     set_login_defs_directive "PASS_WARN_AGE" "14"
     info "login.defs mis à jour (max 90j, min 7j, avertissement 14j avant expiration)."
 
+    # AUTH-9328 : umask plus strict
+    set_login_defs_directive "UMASK" "027"
+    info "Umask par défaut renforcé (027)."
+
+    # AUTH-9230 : rounds de hashage des mots de passe explicitement définis
+    # Remarque : s'applique aux PROCHAINS changements de mot de passe, pas
+    # rétroactivement au mot de passe root déjà défini plus tôt dans ce run.
+    set_login_defs_directive "ENCRYPT_METHOD" "SHA512"
+    set_login_defs_directive "SHA_CRYPT_MIN_ROUNDS" "5000"
+    set_login_defs_directive "SHA_CRYPT_MAX_ROUNDS" "100000"
+    info "Rounds de hashage des mots de passe configurés (SHA512, 5000-100000 rounds)."
+
     # Application rétroactive sur les comptes existants (root + comptes humains UID >= 1000)
     local username uid
     while IFS=: read -r username _ uid _; do
@@ -578,7 +612,7 @@ EOF
     fi
 }
 
-# FINT-4350 : AIDE (intégrité des fichiers)
+# FINT-4350 : AIDE (intégrité des fichiers) + FINT-4402 : checksums SHA256
 harden_aide() {
     info "Installation d'AIDE (surveillance d'intégrité des fichiers)..."
 
@@ -589,6 +623,32 @@ harden_aide() {
         fi
     else
         info "AIDE déjà installé."
+    fi
+
+    # FINT-4402 : renforcement de l'algorithme de checksum (SHA256), AVANT
+    # l'initialisation de la base pour éviter un double travail. On valide la
+    # syntaxe avant de garder le changement, et on restaure sinon (aucun
+    # risque de casser AIDE si la modification s'avère invalide).
+    local aide_conf="/etc/aide/aide.conf"
+    if [[ -f "$aide_conf" ]] && ! grep -q 'sha256' "$aide_conf"; then
+        info "Renforcement de l'algorithme de checksum AIDE (ajout de sha256)..."
+        local aide_conf_backup
+        aide_conf_backup="${aide_conf}.bak.$(date +%Y%m%d%H%M%S)"
+        cp "$aide_conf" "$aide_conf_backup"
+
+        # N'ajoute +sha256 qu'aux lignes de définition de règles (contenant
+        # déjà md5 ou sha1) qui n'ont pas déjà sha256 : idempotent et ciblé,
+        # ne touche à rien d'autre dans le fichier.
+        sed -i -E '/^[A-Za-z_]+[[:space:]]*=.*(md5|sha1)/{ /sha256/! s/$/+sha256/ }' "$aide_conf"
+
+        if command -v aide &> /dev/null && aide --config-check &> /dev/null; then
+            info "Configuration AIDE validée avec sha256 ajouté."
+        else
+            warn "La modification du checksum AIDE semble invalide, restauration de la configuration d'origine."
+            cp "$aide_conf_backup" "$aide_conf"
+        fi
+    elif [[ -f "$aide_conf" ]]; then
+        info "AIDE utilise déjà sha256, aucune modification nécessaire."
     fi
 
     info "Initialisation de la base de référence AIDE (peut prendre plusieurs minutes)..."
@@ -606,21 +666,231 @@ harden_aide() {
     info "Vérification manuelle possible ensuite avec : aide --check"
 }
 
+# HRDN-7230 : scanner de malware (rkhunter)
+harden_malware_scanner() {
+    info "Installation du scanner de malware (rkhunter)..."
+
+    if ! command -v rkhunter &> /dev/null; then
+        if ! (apt-get update -qq && apt-get install -y rkhunter); then
+            error "Échec de l'installation de rkhunter."
+            return 1
+        fi
+    else
+        info "rkhunter déjà installé."
+    fi
+
+    # Met à jour les définitions, puis construit une base de référence propre
+    rkhunter --update &> /dev/null || warn "Échec de la mise à jour des définitions rkhunter (pas bloquant)."
+    if rkhunter --propupd &> /dev/null; then
+        info "rkhunter configuré (base de référence des propriétés créée)."
+    else
+        warn "Échec de la création de la base de référence rkhunter."
+    fi
+
+    info "Scan manuel possible ensuite avec : rkhunter --check"
+}
+
+# KRNL-5820 : désactivation des core dumps
+harden_disable_coredumps() {
+    info "Désactivation des core dumps..."
+
+    local limits_file="/etc/security/limits.conf"
+    if [[ ! -f "$limits_file" ]]; then
+        warn "$limits_file introuvable, étape ignorée."
+        return 1
+    fi
+    cp "$limits_file" "${limits_file}.bak.$(date +%Y%m%d%H%M%S)"
+
+    if ! grep -qE '^\*[[:space:]]+hard[[:space:]]+core[[:space:]]+0' "$limits_file"; then
+        echo "* hard core 0" >> "$limits_file"
+    fi
+    if ! grep -qE '^\*[[:space:]]+soft[[:space:]]+core[[:space:]]+0' "$limits_file"; then
+        echo "* soft core 0" >> "$limits_file"
+    fi
+
+    local sysctl_file="/etc/sysctl.d/60-harden-sh-coredump.conf"
+    echo "fs.suid_dumpable = 0" > "$sysctl_file"
+    sysctl -p "$sysctl_file" &> /dev/null || warn "Échec de l'application immédiate du sysctl (sera actif au prochain boot)."
+
+    info "Core dumps désactivés (limits.conf + sysctl)."
+}
+
+# USB-1000 / STRG-1846 : désactivation du stockage amovible (USB/Firewire)
+harden_disable_removable_storage() {
+    info "Désactivation des pilotes de stockage amovible (USB/Firewire)..."
+
+    local blacklist_file="/etc/modprobe.d/harden-sh-blacklist-storage.conf"
+    cat > "$blacklist_file" << 'EOF'
+# Ajouté par harden.sh - désactive le stockage amovible
+blacklist usb-storage
+blacklist firewire-core
+blacklist firewire-ohci
+blacklist firewire-sbp2
+EOF
+
+    # Tentative de déchargement immédiat : échec sans gravité si le module
+    # est déjà en cours d'utilisation ou absent (effectif au prochain boot).
+    modprobe -r usb-storage &> /dev/null || true
+    modprobe -r firewire-ohci &> /dev/null || true
+
+    info "Stockage amovible désactivé pour les prochains démarrages : $blacklist_file"
+}
+
+# NETW-3200 : désactivation des protocoles réseau rarement utilisés
+harden_disable_rare_protocols() {
+    info "Désactivation des protocoles réseau rares (dccp, sctp, rds, tipc)..."
+
+    local blacklist_file="/etc/modprobe.d/harden-sh-blacklist-netproto.conf"
+    cat > "$blacklist_file" << 'EOF'
+# Ajouté par harden.sh - empêche le chargement de ces protocoles rares
+install dccp /bin/false
+install sctp /bin/false
+install rds /bin/false
+install tipc /bin/false
+EOF
+
+    info "Protocoles réseau rares bloqués : $blacklist_file"
+}
+
+# PKGS-7420 : mises à jour de sécurité automatiques
+harden_auto_updates() {
+    info "Installation des mises à jour de sécurité automatiques (unattended-upgrades)..."
+
+    if ! dpkg -s unattended-upgrades &> /dev/null; then
+        if ! (apt-get update -qq && apt-get install -y unattended-upgrades); then
+            error "Échec de l'installation d'unattended-upgrades."
+            return 1
+        fi
+    else
+        info "unattended-upgrades déjà installé."
+    fi
+
+    cat > /etc/apt/apt.conf.d/20auto-upgrades << 'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+
+    systemctl enable --now unattended-upgrades &> /dev/null || true
+    info "Mises à jour de sécurité automatiques activées."
+}
+
+# ACCT-9622 / ACCT-9626 : process accounting + sysstat
+harden_process_accounting() {
+    info "Activation du process accounting (acct) et de sysstat..."
+
+    if ! dpkg -s acct &> /dev/null; then
+        if ! (apt-get update -qq && apt-get install -y acct); then
+            error "Échec de l'installation d'acct."
+            return 1
+        fi
+    fi
+    systemctl enable --now acct &> /dev/null || true
+
+    if ! dpkg -s sysstat &> /dev/null; then
+        if ! (apt-get update -qq && apt-get install -y sysstat); then
+            error "Échec de l'installation de sysstat."
+            return 1
+        fi
+    fi
+
+    if [[ -f /etc/default/sysstat ]]; then
+        sed -i 's/^ENABLED=.*/ENABLED="true"/' /etc/default/sysstat
+    fi
+    systemctl enable --now sysstat &> /dev/null || true
+
+    info "Process accounting et sysstat actifs."
+}
+
+# PKGS-7370 / PKGS-7394 / DEB-0280 / DEB-0810 / DEB-0831 : utilitaires complémentaires
+harden_misc_packages() {
+    info "Installation des utilitaires complémentaires (debsums, apt-show-versions,"
+    info "libpam-tmpdir, apt-listbugs, needrestart)..."
+
+    local packages=(debsums apt-show-versions libpam-tmpdir apt-listbugs needrestart)
+
+    if apt-get update -qq && apt-get install -y "${packages[@]}"; then
+        info "Utilitaires installés : ${packages[*]}"
+    else
+        error "Échec de l'installation d'un ou plusieurs utilitaires complémentaires."
+        return 1
+    fi
+}
+
+# BANN-7126 / BANN-7130 : bannière légale SSH
+harden_legal_banner() {
+    info "Ajout d'une bannière légale (/etc/issue et /etc/issue.net)..."
+
+    local banner_text="Accès réservé aux utilisateurs autorisés. Toute tentative d'accès non autorisé est interdite et peut faire l'objet de poursuites."
+    local sshd_snapshot
+    sshd_snapshot="${SSHD_CONFIG}.bak.banner.$(date +%Y%m%d%H%M%S)"
+
+    cp "$SSHD_CONFIG" "$sshd_snapshot"
+    echo "$banner_text" > /etc/issue
+    echo "$banner_text" > /etc/issue.net
+    set_ssh_directive "Banner" "/etc/issue.net"
+
+    if ! sshd -t; then
+        error "Configuration SSH invalide après ajout de la bannière, restauration..."
+        cp "$sshd_snapshot" "$SSHD_CONFIG"
+        return 1
+    fi
+
+    if systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null; then
+        info "Bannière légale configurée et SSH redémarré."
+    else
+        error "Échec du redémarrage SSH après ajout de la bannière, restauration..."
+        cp "$sshd_snapshot" "$SSHD_CONFIG"
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+        return 1
+    fi
+}
+
+# TIME-3185 : synchronisation NTP (systemd-timesyncd)
+harden_time_sync() {
+    info "Vérification/activation de la synchronisation NTP (systemd-timesyncd)..."
+
+    if ! command -v timedatectl &> /dev/null; then
+        warn "timedatectl indisponible, étape ignorée."
+        return 1
+    fi
+
+    timedatectl set-ntp true 2>/dev/null || true
+    systemctl enable --now systemd-timesyncd &> /dev/null || true
+
+    if systemctl restart systemd-timesyncd; then
+        info "systemd-timesyncd actif (la synchronisation effective dépend de l'accès réseau aux serveurs NTP)."
+    else
+        error "Échec du redémarrage de systemd-timesyncd."
+        return 1
+    fi
+}
+
 # ----------------------------------------------------------------------------
 # 8. fail2ban (dans tous les cas, indépendamment du mode d'authentification)
 # ----------------------------------------------------------------------------
 install_fail2ban
 
 # ----------------------------------------------------------------------------
-# 8.5. Durcissements priorité élevée (chacun isolé, une erreur n'arrête pas le reste)
+# 8.5. Durcissements priorité élevée, moyenne et faible (chacun isolé, une
+# erreur n'arrête jamais le reste du script)
 # ----------------------------------------------------------------------------
 echo ""
-info "Application des durcissements complémentaires (priorité élevée, audit Lynis)..."
+info "Application des durcissements complémentaires (audit Lynis)..."
 
-( harden_password_policy )   || warn "Échec de la politique d'expiration des mots de passe, on continue."
-( harden_password_strength ) || warn "Échec du contrôle de complexité des mots de passe, on continue."
-( harden_auditd )            || warn "Échec de la configuration d'auditd, on continue."
-( harden_aide )               || warn "Échec de l'initialisation d'AIDE, on continue."
+( harden_password_policy )            || warn "Échec de la politique d'expiration des mots de passe, on continue."
+( harden_password_strength )          || warn "Échec du contrôle de complexité des mots de passe, on continue."
+( harden_auditd )                     || warn "Échec de la configuration d'auditd, on continue."
+( harden_aide )                       || warn "Échec de l'initialisation d'AIDE, on continue."
+( harden_malware_scanner )            || warn "Échec de l'installation du scanner de malware, on continue."
+( harden_disable_coredumps )          || warn "Échec de la désactivation des core dumps, on continue."
+( harden_disable_removable_storage )  || warn "Échec de la désactivation du stockage amovible, on continue."
+( harden_disable_rare_protocols )     || warn "Échec de la désactivation des protocoles réseau rares, on continue."
+( harden_auto_updates )               || warn "Échec de l'installation des mises à jour automatiques, on continue."
+( harden_process_accounting )         || warn "Échec de l'activation du process accounting, on continue."
+( harden_misc_packages )              || warn "Échec de l'installation des utilitaires complémentaires, on continue."
+( harden_legal_banner )               || warn "Échec de l'ajout de la bannière légale, on continue."
+( harden_time_sync )                  || warn "Échec de la synchronisation NTP, on continue."
 
 info "Durcissements complémentaires terminés."
 
