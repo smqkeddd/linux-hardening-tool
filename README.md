@@ -1,14 +1,16 @@
 # linux-hardening-tool
 
 Un outil simple en Bash pour sécuriser rapidement un serveur Linux (Debian/Ubuntu) fraîchement installé.
-Je recommande personnellement de l'utiliser uniquement pour le moment dans un usage personelle type HomeLab ou autre.
+
+Je recommande personnellement de l'utiliser uniquement pour le moment dans un usage personnel type HomeLab ou autre.
+
 ## ⚠️ Avertissement
 
-Ce projet est en développement actif. **Teste-le toujours sur une VM ou un conteneur jetable avant de l'utiliser.** Un bug dans la configuration SSH peut te couper l'accès distant à ta machine si tu n'as pas d'accès console physique/hyperviseur de secours.
+Ce projet est en développement actif. **Teste-le toujours sur une VM ou un conteneur jetable avant de l'utiliser sur une machine en production.** Un bug dans la configuration SSH peut te couper l'accès distant à ta machine si tu n'as pas d'accès console physique/hyperviseur de secours.
 
 ## Scripts inclus
 
-- **`harden.sh`** — sécurise la machine (mot de passe root, port SSH, durcissement, authentification, fail2ban)
+- **`harden.sh`** — sécurise la machine (mot de passe root, port SSH, durcissement, authentification, fail2ban, politique de mots de passe, auditd, AIDE)
 - **`unharden.sh`** — annule les modifications de `harden.sh`, avec deux modes au choix
 
 ## Ce que fait `harden.sh`
@@ -24,8 +26,13 @@ Ce projet est en développement actif. **Teste-le toujours sur une VM ou un cont
   - **Clé SSH** : ajoute ta clé publique, teste la connexion avant de désactiver le mot de passe (aucun risque de blocage)
   - **Mot de passe** : garde le mot de passe actif
 - **fail2ban** installé et configuré dans les deux cas (paramètres personnalisables en mode avancé)
+- **Politique d'expiration des mots de passe** : max 90 jours, min 7 jours, avertissement 14 jours avant expiration — appliqué à `root` et à tous les comptes existants (`/etc/login.defs` + `chage`)
+- **Complexité des mots de passe** (`pam_pwquality`) : 12 caractères minimum, majuscule + minuscule + chiffre + symbole exigés
+- **auditd** : trace les accès/modifications sur les fichiers sensibles (`/etc/passwd`, `/etc/shadow`, `sshd_config`, `sudoers`) et les exécutions de `passwd`/`sudo`
+- **AIDE** : installe et initialise une base de référence pour détecter toute modification non autorisée de fichiers système
 - Vérifie la validité de la configuration SSH avant chaque redémarrage du service (`sshd -t`)
-- Restaure automatiquement la sauvegarde en cas d'erreur
+- Restaure automatiquement la sauvegarde en cas d'erreur sur la partie SSH
+- Chacun des 4 durcissements complémentaires (politique mdp, complexité, auditd, AIDE) s'exécute de façon isolée : si l'un échoue (ex. pas de connexion internet), le script continue sans s'arrêter
 - Sauvegarde l'état d'origine de la machine (une seule fois, lors du tout premier lancement) pour permettre un rollback complet via `unharden.sh`
 - Affiche les nouvelles informations **une seule fois** à l'écran, jamais stockées sur disque
 
@@ -44,7 +51,7 @@ Propose un menu à deux modes :
 - Debian ou Ubuntu (testé sur Debian 12)
 - Accès root ou sudo
 - OpenSSH installé (`openssh-server`)
-- Accès internet pour l'installation de fail2ban
+- Accès internet pour l'installation de fail2ban, pam_pwquality, auditd et AIDE
 
 ## Installation
 
@@ -72,6 +79,8 @@ ssh -p <nouveau_port> root@<ip_de_la_machine>
 
 Si tu choisis l'authentification par clé SSH, le script garde le mot de passe actif en fallback jusqu'à ce que tu confirmes que ta clé fonctionne dans un second terminal — aucun risque de te retrouver bloqué dehors.
 
+L'initialisation d'AIDE (dernière étape) peut prendre plusieurs minutes selon la taille du système de fichiers — c'est normal.
+
 ### Annuler les modifications
 
 ```bash
@@ -79,6 +88,19 @@ sudo ./unharden.sh
 ```
 
 Choisis ensuite le mode de restauration souhaité (reset par défaut, ou retour à l'état d'avant `harden.sh`).
+
+### Consulter les logs d'audit (auditd)
+
+```bash
+sudo ausearch -k sshd_config_changes
+sudo aureport --summary
+```
+
+### Vérifier l'intégrité des fichiers (AIDE)
+
+```bash
+sudo aide --check
+```
 
 ## Contribuer
 
