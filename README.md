@@ -30,7 +30,7 @@ Ce projet est en développement actif . **A Tester sur une VM ou un conteneur je
 ## Installation
 
 ```bash
-git clone https://github.com/<ton-user>/linux-hardening-tool.git
+git clone https://github.com/smqkeddd/linux-hardening-tool.git
 cd linux-hardening-tool
 chmod +x harden.sh
 ```
