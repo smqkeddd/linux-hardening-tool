@@ -463,9 +463,166 @@ case "$AUTH_MODE" in
 esac
 
 # ----------------------------------------------------------------------------
+# Fonctions : durcissements "priorité élevée" (issus de l'audit Lynis)
+# Chacune est appelée dans un SOUS-SHELL isolé : si l'une échoue, le reste du
+# script continue normalement (aucune propagation d'erreur en cascade).
+# ----------------------------------------------------------------------------
+
+# AUTH-9282 / AUTH-9286 : politique d'expiration des mots de passe
+harden_password_policy() {
+    info "Configuration de la politique d'expiration des mots de passe..."
+
+    local login_defs="/etc/login.defs"
+    if [[ ! -f "$login_defs" ]]; then
+        warn "$login_defs introuvable, étape ignorée."
+        return 1
+    fi
+
+    cp "$login_defs" "${login_defs}.bak.$(date +%Y%m%d%H%M%S)"
+
+    set_login_defs_directive() {
+        local key="$1"
+        local value="$2"
+        if grep -qE "^#?${key}[[:space:]]" "$login_defs"; then
+            sed -i -E "s/^#?${key}[[:space:]]+.*/${key} ${value}/" "$login_defs"
+        else
+            printf '%s\t%s\n' "$key" "$value" >> "$login_defs"
+        fi
+    }
+
+    set_login_defs_directive "PASS_MAX_DAYS" "90"
+    set_login_defs_directive "PASS_MIN_DAYS" "7"
+    set_login_defs_directive "PASS_WARN_AGE" "14"
+    info "login.defs mis à jour (max 90j, min 7j, avertissement 14j avant expiration)."
+
+    # Application rétroactive sur les comptes existants (root + comptes humains UID >= 1000)
+    local username uid
+    while IFS=: read -r username _ uid _; do
+        if [[ "$username" == "root" || "$uid" -ge 1000 ]]; then
+            if chage --maxdays 90 --mindays 7 --warndays 14 "$username" &> /dev/null; then
+                info "Politique appliquée au compte : $username"
+            else
+                warn "Impossible d'appliquer la politique au compte : $username"
+            fi
+        fi
+    done < /etc/passwd
+}
+
+# AUTH-9262 : test de robustesse des mots de passe (pam_pwquality)
+harden_password_strength() {
+    info "Installation du contrôle de complexité des mots de passe (pam_pwquality)..."
+
+    if ! dpkg -s libpam-pwquality &> /dev/null; then
+        if ! (apt-get update -qq && apt-get install -y libpam-pwquality); then
+            error "Échec de l'installation de libpam-pwquality."
+            return 1
+        fi
+    else
+        info "libpam-pwquality déjà installé."
+    fi
+
+    local pam_file="/etc/pam.d/common-password"
+    if [[ ! -f "$pam_file" ]]; then
+        warn "$pam_file introuvable, étape ignorée."
+        return 1
+    fi
+
+    cp "$pam_file" "${pam_file}.bak.$(date +%Y%m%d%H%M%S)"
+
+    local rule="password requisite pam_pwquality.so retry=3 minlen=12 difok=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1"
+
+    if grep -qE '^password\s+requisite\s+pam_pwquality\.so' "$pam_file"; then
+        sed -i -E "s|^password\s+requisite\s+pam_pwquality\.so.*|${rule}|" "$pam_file"
+    else
+        sed -i "/^password.*pam_unix\.so/i ${rule}" "$pam_file"
+    fi
+
+    info "Complexité exigée : 12 caractères min, majuscule/minuscule/chiffre/symbole requis."
+}
+
+# ACCT-9628 : auditd
+harden_auditd() {
+    info "Installation et configuration d'auditd..."
+
+    if ! command -v auditctl &> /dev/null; then
+        if ! (apt-get update -qq && apt-get install -y auditd audispd-plugins); then
+            error "Échec de l'installation d'auditd."
+            return 1
+        fi
+    else
+        info "auditd déjà installé."
+    fi
+
+    local rules_file="/etc/audit/rules.d/harden-sh.rules"
+    cat > "$rules_file" << EOF
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/ssh/sshd_config -p wa -k sshd_config_changes
+-w /etc/sudoers -p wa -k sudoers_changes
+-w /usr/bin/passwd -p x -k passwd_exec
+-w /usr/bin/sudo -p x -k sudo_exec
+EOF
+
+    if command -v augenrules &> /dev/null && augenrules --load &> /dev/null; then
+        info "Règles auditd chargées avec augenrules."
+    else
+        warn "augenrules a échoué ou est indisponible, un redémarrage du service appliquera quand même les règles."
+    fi
+
+    systemctl enable auditd &> /dev/null || true
+    if systemctl restart auditd; then
+        info "auditd actif. Consultation possible avec : ausearch -k sshd_config_changes"
+    else
+        error "Échec du redémarrage d'auditd."
+        return 1
+    fi
+}
+
+# FINT-4350 : AIDE (intégrité des fichiers)
+harden_aide() {
+    info "Installation d'AIDE (surveillance d'intégrité des fichiers)..."
+
+    if ! command -v aide &> /dev/null; then
+        if ! (apt-get update -qq && apt-get install -y aide aide-common); then
+            error "Échec de l'installation d'AIDE."
+            return 1
+        fi
+    else
+        info "AIDE déjà installé."
+    fi
+
+    info "Initialisation de la base de référence AIDE (peut prendre plusieurs minutes)..."
+
+    if command -v aideinit &> /dev/null && aideinit -y -f &> /dev/null; then
+        info "Base AIDE initialisée via aideinit."
+    elif aide --init &> /dev/null && [[ -f /var/lib/aide/aide.db.new ]]; then
+        mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+        info "Base AIDE initialisée (méthode alternative)."
+    else
+        error "Échec de l'initialisation d'AIDE."
+        return 1
+    fi
+
+    info "Vérification manuelle possible ensuite avec : aide --check"
+}
+
+# ----------------------------------------------------------------------------
 # 8. fail2ban (dans tous les cas, indépendamment du mode d'authentification)
 # ----------------------------------------------------------------------------
 install_fail2ban
+
+# ----------------------------------------------------------------------------
+# 8.5. Durcissements priorité élevée (chacun isolé, une erreur n'arrête pas le reste)
+# ----------------------------------------------------------------------------
+echo ""
+info "Application des durcissements complémentaires (priorité élevée, audit Lynis)..."
+
+( harden_password_policy )   || warn "Échec de la politique d'expiration des mots de passe, on continue."
+( harden_password_strength ) || warn "Échec du contrôle de complexité des mots de passe, on continue."
+( harden_auditd )            || warn "Échec de la configuration d'auditd, on continue."
+( harden_aide )               || warn "Échec de l'initialisation d'AIDE, on continue."
+
+info "Durcissements complémentaires terminés."
 
 # ----------------------------------------------------------------------------
 # 9. Affichage UNIQUE des informations sensibles
@@ -486,6 +643,8 @@ else
     echo -e "Reconnexion : ${BOLD}ssh -p ${NEW_SSH_PORT} root@<ip_de_la_machine>${NC}"
 fi
 echo -e "${YELLOW}fail2ban est actif : ${F2B_MAXRETRY} tentatives échouées = ban de ${F2B_BANTIME}s sur l'IP.${NC}"
+echo -e "${YELLOW}Politique mdp (expiration 90j), complexité (12 car. min), auditd et AIDE"
+echo -e "ont été configurés (voir les [!] ci-dessus si l'une des étapes a échoué).${NC}"
 echo ""
 warn "IMPORTANT : teste la connexion SSH sur le nouveau port AVANT de fermer"
 warn "cette session, pour être sûr de ne pas te retrouver bloqué dehors."
