@@ -74,7 +74,9 @@ set_ssh_directive() {
     local key="$1"
     local value="$2"
     if grep -qE "^#?${key}[[:space:]]" "$SSHD_CONFIG"; then
-        sed -i -E "s/^#?${key}[[:space:]].*/${key} ${value}/" "$SSHD_CONFIG"
+        # Délimiteur "|" plutôt que "/" : évite tout conflit si la valeur
+        # contient elle-même des "/" (ex: Banner /etc/issue.net)
+        sed -i -E "s|^#?${key}[[:space:]].*|${key} ${value}|" "$SSHD_CONFIG"
     else
         echo "${key} ${value}" >> "$SSHD_CONFIG"
     fi
@@ -506,7 +508,7 @@ harden_password_policy() {
         local key="$1"
         local value="$2"
         if grep -qE "^#?${key}[[:space:]]" "$login_defs"; then
-            sed -i -E "s/^#?${key}[[:space:]]+.*/${key} ${value}/" "$login_defs"
+            sed -i -E "s|^#?${key}[[:space:]]+.*|${key} ${value}|" "$login_defs"
         else
             printf '%s\t%s\n' "$key" "$value" >> "$login_defs"
         fi
@@ -629,17 +631,28 @@ harden_aide() {
     # l'initialisation de la base pour éviter un double travail. On valide la
     # syntaxe avant de garder le changement, et on restaure sinon (aucun
     # risque de casser AIDE si la modification s'avère invalide).
+    #
+    # Note : sur Debian, la config par défaut utilise "Checksums = H" (= tous
+    # les algorithmes compilés dans le binaire, ce qui inclut déjà sha256 en
+    # pratique). Mais Lynis fait une vérification textuelle simple et cherche
+    # la chaîne littérale "sha256" dans le fichier — d'où la nécessité de la
+    # rendre explicite plutôt que de compter sur le raccourci "H".
     local aide_conf="/etc/aide/aide.conf"
-    if [[ -f "$aide_conf" ]] && ! grep -q 'sha256' "$aide_conf"; then
+    if [[ -f "$aide_conf" ]] && ! grep -qE '^[A-Za-z_]+[[:space:]]*=.*sha256' "$aide_conf"; then
         info "Renforcement de l'algorithme de checksum AIDE (ajout de sha256)..."
         local aide_conf_backup
         aide_conf_backup="${aide_conf}.bak.$(date +%Y%m%d%H%M%S)"
         cp "$aide_conf" "$aide_conf_backup"
 
-        # N'ajoute +sha256 qu'aux lignes de définition de règles (contenant
-        # déjà md5 ou sha1) qui n'ont pas déjà sha256 : idempotent et ciblé,
-        # ne touche à rien d'autre dans le fichier.
-        sed -i -E '/^[A-Za-z_]+[[:space:]]*=.*(md5|sha1)/{ /sha256/! s/$/+sha256/ }' "$aide_conf"
+        if grep -qE '^Checksums[[:space:]]*=[[:space:]]*H[[:space:]]*$' "$aide_conf"; then
+            # Cas standard Debian : remplace le raccourci "H" par une liste
+            # explicite incluant sha256 (et sha512, pour aller plus loin)
+            sed -i -E 's|^Checksums[[:space:]]*=[[:space:]]*H[[:space:]]*$|Checksums = sha256+sha512|' "$aide_conf"
+        else
+            # Fallback générique : ajoute +sha256 aux lignes de règles
+            # existantes contenant déjà md5 ou sha1
+            sed -i -E '/^[A-Za-z_]+[[:space:]]*=.*(md5|sha1)/{ /sha256/! s/$/+sha256/ }' "$aide_conf"
+        fi
 
         if command -v aide &> /dev/null && aide --config-check &> /dev/null; then
             info "Configuration AIDE validée avec sha256 ajouté."
