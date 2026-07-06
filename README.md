@@ -9,6 +9,7 @@ Je recommande actuellement de l'utiliser uniquement pour un usage personnel type
 
 Ce projet est en développement actif. **Teste-le toujours sur une VM avant de l'utiliser sur une machine en production.** Un bug dans la configuration SSH peut te couper l'accès distant à ta machine si tu n'as pas d'accès console physique/hyperviseur de secours.
 
+
 ## Scripts inclus
 
 - **`harden.sh`** — sécurise la machine
@@ -43,6 +44,8 @@ Ce projet est en développement actif. **Teste-le toujours sur une VM avant de l
 - Affiche les informations sensibles **une seule fois**, jamais stockées sur disque
 
 ## Ce que fait `unharden.sh`
+
+⚠️ Je l'ai retirer car instable pour le moment 
 
 Menu à deux modes :
 
