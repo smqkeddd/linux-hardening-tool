@@ -8,38 +8,41 @@ et ce projet respecte le [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Non publié]
 
 ### Ajouté
-- **4 durcissements "priorité élevée" issus de l'audit Lynis**, chacun exécuté dans un sous-shell isolé (une erreur sur l'un n'interrompt jamais le reste du script) :
-  - `harden_password_policy()` : politique d'expiration des mots de passe (`PASS_MAX_DAYS 90`, `PASS_MIN_DAYS 7`, `PASS_WARN_AGE 14` dans `/etc/login.defs`), appliquée rétroactivement à `root` et à tous les comptes existants (UID ≥ 1000) via `chage`
-  - `harden_password_strength()` : installation de `pam_pwquality`, complexité exigée (12 caractères min, majuscule/minuscule/chiffre/symbole)
-  - `harden_auditd()` : installation d'auditd + règles de surveillance sur `/etc/passwd`, `/etc/shadow`, `sshd_config`, `sudoers`, et les exécutions de `passwd`/`sudo`
-  - `harden_aide()` : installation d'AIDE et initialisation de la base de référence d'intégrité des fichiers
-  - Chaque fonction sauvegarde ses fichiers de config avant modification (`login.defs.bak.*`, `common-password.bak.*`)
-- Message d'introduction de `harden.sh` détaillé avec toutes les étapes précises (dont les 4 nouvelles ci-dessus), et avertissement que ces 4 étapes sont indépendantes du reste
-- **Mode avancé pour `harden.sh`** : au lancement, choix entre mode simple (tout automatique) et mode avancé, qui permet de définir soi-même :
-  - Le mot de passe root (généré aléatoirement ou personnalisé, avec confirmation double-saisie et avertissement si trop court)
-  - Le port SSH (généré aléatoirement ou personnalisé, avec validation de plage, avertissement sur les ports privilégiés, et vérification qu'il n'est pas déjà utilisé)
-  - Les paramètres de durcissement SSH (`MaxAuthTries`, `ClientAliveCountMax`, `MaxSessions`)
-  - Les paramètres fail2ban (`maxretry`, `findtime`, `bantime`)
-  - En mode simple, toutes ces valeurs restent générées/définies automatiquement comme avant (aucune régression)
-- Nouvelle fonction `prompt_with_default()` réutilisable pour les questions avec valeur par défaut
-- **Fallback dans `unharden.sh` (mode [2])** : si aucune référence d'origine n'est trouvée dans `/var/lib/harden-sh/` (ex : machine ayant utilisé une version de `harden.sh` antérieure à cette fonctionnalité), le script liste automatiquement les sauvegardes `.bak.*` disponibles avec leur date/heure, et laisse choisir laquelle restaurer
-- Nouveau script `unharden.sh` : annule les modifications de `harden.sh`, avec un menu à deux modes :
-  - **[1] Reset complet par défaut** : port 22, mot de passe root `root` (faible, usage labo/test uniquement), retire la clé SSH ajoutée, désinstalle fail2ban
-  - **[2] Restauration de l'état exact d'avant harden.sh** : redonne à `sshd_config` sa configuration d'origine (ex: si le port était déjà personnalisé avant, ex 222, il le redevient), restaure/supprime `authorized_keys` selon l'état d'origine, gère fail2ban en conséquence
-  - Sauvegarde automatique de l'état d'origine (sshd_config, authorized_keys, présence/config fail2ban) lors de la **toute première exécution** de `harden.sh`, stockée dans `/var/lib/harden-sh/` (aucune donnée sensible : pas de mots de passe stockés, uniquement de la config et des clés publiques)
-  - **Limite connue** : le mot de passe root d'origine ne peut jamais être restauré dans le mode [2] (jamais stocké nulle part, par design sécurité). Un nouveau mot de passe aléatoire est généré à la place, affiché une seule fois
+- **GRUB** : mot de passe (aléatoire, ou personnalisé en mode avancé) protégeant l'édition des entrées de boot et la console GRUB, sans bloquer le démarrage normal (patch `--unrestricted` sur `10_linux`)
+- **PermitRootLogin=prohibit-password** : appliqué uniquement si l'authentification par clé a été confirmée fonctionnelle dans la même exécution, pour éviter tout risque de blocage
+- **rkhunter** : installation, mise à jour des définitions, création de la base de référence
+- **Core dumps désactivés** (`limits.conf` + `sysctl`)
+- **Stockage amovible désactivé** (USB, Firewire) via blacklist modprobe
+- **Protocoles réseau rares bloqués** (dccp, sctp, rds, tipc)
+- **Mises à jour de sécurité automatiques** (`unattended-upgrades`)
+- **Process accounting** (`acct`) et `sysstat`
+- **Bannière légale SSH** bilingue (contient les mots-clés requis par les audits type Lynis)
+- **Synchronisation NTP** (`systemd-timesyncd`)
+- **Politique de mots de passe étendue** : umask 027, rounds de hashage SHA512 explicites, en plus de l'expiration déjà en place
+- **Complexité des mots de passe** (`pam_pwquality`), **auditd**, **AIDE** (durcissements "priorité élevée" de l'audit Lynis)
+- **Mode avancé pour `harden.sh`** : choix du port SSH, du mot de passe root, du mot de passe GRUB, et des réglages fins (SSH, fail2ban) — Entrée garde la valeur par défaut
+- **`unharden.sh`** : annule les modifications de `harden.sh`, menu à deux modes (reset par défaut, ou retour à l'état exact d'avant `harden.sh`), avec repli automatique sur les sauvegardes `.bak.*` si la référence d'origine est absente
+- Sauvegarde de l'état d'origine de la machine au tout premier lancement de `harden.sh` (`/var/lib/harden-sh/`)
+
+### Corrigé
+- Bug de délimiteur `sed` dans la fonction d'application des directives (`/` en conflit avec des valeurs contenant elles-mêmes des `/`, comme `Banner /etc/issue.net`)
+- Détection du checksum AIDE trop restrictive (ne fonctionnait pas avec la config par défaut Debian `Checksums = H`)
+- Validation `aide --config-check` incomplète (paramètre `--config` manquant, faisait échouer la validation à tort)
+- Bannière légale entièrement en français : ne matchait aucun des mots-clés attendus par le test Lynis (liste en anglais) — texte rendu bilingue
+
+### Optimisé
+- Fusion de `set_ssh_directive()` et `set_login_defs_directive()` en une seule fonction générique `set_directive()`
+- Extraction du pattern de redémarrage SSH (`restart_ssh()`) et du pattern sauvegarde/test/rollback (`safe_apply_ssh_directive()`), tous deux dupliqués une dizaine de fois auparavant
+- Réorganisation du script dans un ordre plus logique (helpers → vérifications → cœur SSH → durcissements complémentaires → affichage)
+- Commentaires raccourcis, suppression des séparateurs `# ----------`
+- Script réduit de ~1150 à ~790 lignes sans perte de fonctionnalité
 
 ### À venir
 - Option de création d'utilisateur sudo non-root
-- Désactivation optionnelle de PermitRootLogin
-- Éléments "priorité moyenne/faible" restants de l'audit Lynis (umask, core dump, bannière légale, mises à jour automatiques, etc.)
-
-### Modifié
-- fail2ban est désormais installé et configuré **dans les deux modes d'authentification** (clé SSH ou mot de passe), et non plus uniquement en mode mot de passe. Utile même avec des clés pour limiter le bruit des scans/tentatives automatisées.
+- Durcissement de l'accès aux compilateurs (HRDN-7222)
 
 ### Testé puis mis de côté
-- Mot de passe GRUB aléatoire : fonctionnel, mais retiré temporairement car le comportement par défaut de GRUB (`superusers` + `password_pbkdf2`) demande le mot de passe à **chaque démarrage**, pas seulement pour l'édition des entrées de boot. Risque de blocage sur un serveur distant sans accès console. À réintroduire une fois l'option `--unrestricted` correctement gérée pour les entrées de boot normales.
-- Firewall ufw : testé avec succès (politique par défaut + autorisation du port SSH avant activation), mais mis de côté pour se concentrer sur d'autres priorités. À réintégrer plus tard.
+- Firewall ufw : fonctionnel, mis de côté pour se concentrer sur d'autres priorités
 
 ## [0.3.0] - 2026-07-05
 
