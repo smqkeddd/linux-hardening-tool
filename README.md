@@ -2,13 +2,11 @@
 
 Un outil simple en Bash pour sécuriser rapidement un serveur Linux (Debian/Ubuntu) fraîchement installé.
 
-Je recommande actuellement de l'utiliser uniquement pour un usage personnel type HomeLab ou autre.
-⚠️ Ne fonctionne pas dans un conteneur 
+Je recommande personnellement de l'utiliser uniquement pour le moment dans un usage personnel type HomeLab ou autre.
 
 ## ⚠️ Avertissement
 
-Ce projet est en développement actif. **Teste-le toujours sur une VM avant de l'utiliser sur une machine en production.** Un bug dans la configuration SSH peut te couper l'accès distant à ta machine si tu n'as pas d'accès console physique/hyperviseur de secours.
-
+Ce projet est en développement actif. **Teste-le toujours sur une VM ou un conteneur jetable avant de l'utiliser sur une machine en production.** Un bug dans la configuration SSH peut te couper l'accès distant à ta machine si tu n'as pas d'accès console physique/hyperviseur de secours.
 
 ## Scripts inclus
 
@@ -44,8 +42,6 @@ Ce projet est en développement actif. **Teste-le toujours sur une VM avant de l
 - Affiche les informations sensibles **une seule fois**, jamais stockées sur disque
 
 ## Ce que fait `unharden.sh`
-
-⚠️ Je l'ai retirer car instable pour le moment 
 
 Menu à deux modes :
 
